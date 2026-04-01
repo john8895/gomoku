@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>五子棋 Gomoku</title>
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #ffffff;
+  color: #000000;
+  font-family: serif;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-box-direction: normal;
+  -webkit-flex-direction: column;
+  -ms-flex-direction: column;
+  flex-direction: column;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  -ms-flex-align: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+h1 {
+  font-size: 56px;
+  font-weight: bold;
+  letter-spacing: 8px;
+  margin-bottom: 30px;
+  border-bottom: 4px solid #000000;
+  padding-bottom: 16px;
+  width: 100%;
+  text-align: center;
+}
+
+#status-bar {
+  font-size: 38px;
+  font-weight: bold;
+  margin-bottom: 30px;
+  padding: 16px 40px;
+  border: 3px solid #000000;
+  background-color: #f0f0f0;
+  min-width: 500px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
+#canvas-wrapper {
+  position: relative;
+  margin-bottom: 40px;
+}
+
+#board-canvas {
+  display: block;
+  border: 4px solid #000000;
+  cursor: pointer;
+  background-color: #e8d8a0;
+}
+
+#btn-row {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-orient: horizontal;
+  -webkit-box-direction: normal;
+  -webkit-flex-direction: row;
+  -ms-flex-direction: row;
+  flex-direction: row;
+  gap: 40px;
+}
+
+.btn {
+  font-size: 36px;
+  font-weight: bold;
+  padding: 22px 60px;
+  border: 4px solid #000000;
+  background-color: #ffffff;
+  color: #000000;
+  cursor: pointer;
+  letter-spacing: 4px;
+  min-width: 260px;
+  text-align: center;
+}
+
+.btn:active {
+  background-color: #cccccc;
+}
+
+.btn-undo {
+  background-color: #f0f0f0;
+}
+
+.btn-restart {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.btn-restart:active {
+  background-color: #444444;
+}
+
+#overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.6);
+  z-index: 100;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  -ms-flex-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  -ms-flex-pack: center;
+  justify-content: center;
+}
+
+#overlay.active {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+}
+
+#result-box {
+  background-color: #ffffff;
+  border: 6px solid #000000;
+  padding: 60px 80px;
+  text-align: center;
+}
+
+#result-title {
+  font-size: 64px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  letter-spacing: 8px;
+}
+
+#result-sub {
+  font-size: 40px;
+  margin-bottom: 50px;
+  color: #333333;
+}
+
+#btn-play-again {
+  font-size: 40px;
+  font-weight: bold;
+  padding: 24px 80px;
+  border: 4px solid #000000;
+  background-color: #000000;
+  color: #ffffff;
+  cursor: pointer;
+  letter-spacing: 6px;
+}
+
+#btn-play-again:active {
+  background-color: #444444;
+}
+</style>
+</head>
+<body>
+
+<h1>五子棋</h1>
+
+<div id="status-bar">黑方先手</div>
+
+<div id="canvas-wrapper">
+  <canvas id="board-canvas"></canvas>
+</div>
+
+<div id="btn-row">
+  <button class="btn btn-undo" id="btn-undo">悔棋</button>
+  <button class="btn btn-restart" id="btn-restart">重新開始</button>
+</div>
+
+<div id="overlay">
+  <div id="result-box">
+    <div id="result-title"></div>
+    <div id="result-sub"></div>
+    <button id="btn-play-again">再來一局</button>
+  </div>
+</div>
+
+<script>
+// ---------- constants ----------
+var BOARD_SIZE = 15;
+var CELL_PX = 72;          // px per cell gap
+var MARGIN = 60;           // px margin around grid
+var STONE_R = 30;          // stone radius px
+var CANVAS_SIZE = MARGIN * 2 + CELL_PX * (BOARD_SIZE - 1);
+
+// ---------- state ----------
+var board = [];            // 2-D array, 0=empty, 1=black, 2=white
+var history = [];          // stack of {r, c, player}
+var currentPlayer = 1;     // 1=black, 2=white
+var gameOver = false;
+
+// ---------- DOM ----------
+var canvas = document.getElementById('board-canvas');
+var ctx = canvas.getContext('2d');
+var statusBar = document.getElementById('status-bar');
+var overlay = document.getElementById('overlay');
+var resultTitle = document.getElementById('result-title');
+var resultSub = document.getElementById('result-sub');
+
+// ---------- init ----------
+function initBoard() {
+  var i, j;
+  board = [];
+  for (i = 0; i < BOARD_SIZE; i++) {
+    board[i] = [];
+    for (j = 0; j < BOARD_SIZE; j++) {
+      board[i][j] = 0;
+    }
+  }
+  history = [];
+  currentPlayer = 1;
+  gameOver = false;
+}
+
+function setup() {
+  canvas.width = CANVAS_SIZE;
+  canvas.height = CANVAS_SIZE;
+  initBoard();
+  drawBoard();
+  updateStatus();
+}
+
+// ---------- draw ----------
+function drawBoard() {
+  var i, x, y;
+
+  // background
+  ctx.fillStyle = '#e8d8a0';
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+  // grid lines
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+
+  for (i = 0; i < BOARD_SIZE; i++) {
+    x = MARGIN + i * CELL_PX;
+    // vertical
+    ctx.beginPath();
+    ctx.moveTo(x, MARGIN);
+    ctx.lineTo(x, MARGIN + (BOARD_SIZE - 1) * CELL_PX);
+    ctx.stroke();
+    // horizontal
+    ctx.beginPath();
+    ctx.moveTo(MARGIN, MARGIN + i * CELL_PX);
+    ctx.lineTo(MARGIN + (BOARD_SIZE - 1) * CELL_PX, MARGIN + i * CELL_PX);
+    ctx.stroke();
+  }
+
+  // star points (standard gomoku: tengen + 4 hoshi)
+  var stars = [
+    [3,3],[3,11],[7,7],[11,3],[11,11]
+  ];
+  ctx.fillStyle = '#000000';
+  for (i = 0; i < stars.length; i++) {
+    ctx.beginPath();
+    ctx.arc(
+      MARGIN + stars[i][1] * CELL_PX,
+      MARGIN + stars[i][0] * CELL_PX,
+      7, 0, Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  // stones
+  var r, c;
+  for (r = 0; r < BOARD_SIZE; r++) {
+    for (c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] !== 0) {
+        drawStone(r, c, board[r][c]);
+      }
+    }
+  }
+
+  // last move marker
+  if (history.length > 0) {
+    var last = history[history.length - 1];
+    var cx = MARGIN + last.c * CELL_PX;
+    var cy = MARGIN + last.r * CELL_PX;
+    ctx.strokeStyle = (last.player === 1) ? '#ffffff' : '#000000';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawStone(r, c, player) {
+  var cx = MARGIN + c * CELL_PX;
+  var cy = MARGIN + r * CELL_PX;
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.arc(cx + 3, cy + 3, STONE_R, 0, Math.PI * 2);
+  ctx.fill();
+
+  // stone body
+  if (player === 1) {
+    // black stone
+    ctx.fillStyle = '#111111';
+    ctx.beginPath();
+    ctx.arc(cx, cy, STONE_R, 0, Math.PI * 2);
+    ctx.fill();
+    // subtle highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(cx - 8, cy - 8, STONE_R * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // white stone
+    ctx.fillStyle = '#f8f8f8';
+    ctx.beginPath();
+    ctx.arc(cx, cy, STONE_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, STONE_R, 0, Math.PI * 2);
+    ctx.stroke();
+    // subtle highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(cx - 8, cy - 8, STONE_R * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---------- logic ----------
+function placeStone(r, c) {
+  if (gameOver) return;
+  if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return;
+  if (board[r][c] !== 0) return;
+
+  board[r][c] = currentPlayer;
+  history.push({ r: r, c: c, player: currentPlayer });
+
+  drawBoard();
+
+  if (checkWin(r, c, currentPlayer)) {
+    gameOver = true;
+    var winner = (currentPlayer === 1) ? '黑方' : '白方';
+    showResult(winner + '勝利！', '五子連線，獲得本局勝利');
+    updateStatus(winner + ' 獲勝');
+    return;
+  }
+
+  if (history.length === BOARD_SIZE * BOARD_SIZE) {
+    gameOver = true;
+    showResult('平局', '棋盤已滿，無勝負');
+    updateStatus('平局');
+    return;
+  }
+
+  currentPlayer = (currentPlayer === 1) ? 2 : 1;
+  updateStatus();
+}
+
+function checkWin(r, c, player) {
+  var directions = [
+    [0, 1],   // horizontal
+    [1, 0],   // vertical
+    [1, 1],   // diagonal \
+    [1, -1]   // diagonal /
+  ];
+  var i, dr, dc, count, nr, nc;
+  for (i = 0; i < directions.length; i++) {
+    dr = directions[i][0];
+    dc = directions[i][1];
+    count = 1;
+    // forward
+    nr = r + dr; nc = c + dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr += dr; nc += dc;
+    }
+    // backward
+    nr = r - dr; nc = c - dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr -= dr; nc -= dc;
+    }
+    if (count >= 5) return true;
+  }
+  return false;
+}
+
+function undo() {
+  if (gameOver) return;
+  if (history.length === 0) return;
+  var last = history.pop();
+  board[last.r][last.c] = 0;
+  currentPlayer = last.player;
+  drawBoard();
+  updateStatus();
+}
+
+function restart() {
+  overlay.className = '';
+  initBoard();
+  drawBoard();
+  updateStatus();
+}
+
+// ---------- UI ----------
+function updateStatus(msg) {
+  if (msg) {
+    statusBar.textContent = msg;
+    return;
+  }
+  statusBar.textContent = (currentPlayer === 1) ? '黑方落子' : '白方落子';
+}
+
+function showResult(title, sub) {
+  resultTitle.textContent = title;
+  resultSub.textContent = sub;
+  overlay.className = 'active';
+}
+
+// ---------- events ----------
+canvas.addEventListener('click', function(e) {
+  if (gameOver) return;
+  var rect = canvas.getBoundingClientRect();
+  var scaleX = canvas.width / rect.width;
+  var scaleY = canvas.height / rect.height;
+  var px = (e.clientX - rect.left) * scaleX;
+  var py = (e.clientY - rect.top) * scaleY;
+
+  // snap to nearest intersection
+  var c = Math.round((px - MARGIN) / CELL_PX);
+  var r = Math.round((py - MARGIN) / CELL_PX);
+
+  // check proximity (within half cell)
+  var snapX = MARGIN + c * CELL_PX;
+  var snapY = MARGIN + r * CELL_PX;
+  var dist = Math.sqrt((px - snapX) * (px - snapX) + (py - snapY) * (py - snapY));
+  if (dist > CELL_PX * 0.5) return;
+
+  placeStone(r, c);
+});
+
+document.getElementById('btn-undo').addEventListener('click', function() {
+  undo();
+});
+
+document.getElementById('btn-restart').addEventListener('click', function() {
+  restart();
+});
+
+document.getElementById('btn-play-again').addEventListener('click', function() {
+  restart();
+});
+
+// ---------- start ----------
+setup();
+</script>
+</body>
+</html>
