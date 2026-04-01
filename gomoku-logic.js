@@ -89,35 +89,68 @@ function evalCell(board, r, c, player) {
   return score;
 }
 
-// Pick best move for `aiPlayer` against `humanPlayer`
-// Returns {r, c} or null if board is full
-function getAiMove(board, aiPlayer, humanPlayer) {
-  var r, c, attackScore, defenseScore, totalScore;
-  var bestScore = -1;
-  var bestMoves = [];
+// Return candidate cells: empty cells within `range` steps of any existing stone
+function getCandidates(board, range) {
+  var r, c, dr, dc, nr, nc;
+  var seen = {};
+  var candidates = [];
 
   for (r = 0; r < BOARD_SIZE; r++) {
     for (c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] !== 0) continue;
-
-      // Temporarily place stone to evaluate
-      board[r][c] = aiPlayer;
-      attackScore = evalCell(board, r, c, aiPlayer);
-      board[r][c] = 0;
-
-      board[r][c] = humanPlayer;
-      defenseScore = evalCell(board, r, c, humanPlayer);
-      board[r][c] = 0;
-
-      // Slightly favour attack; heavily penalise letting opponent win
-      totalScore = attackScore * 1.1 + defenseScore;
-
-      if (totalScore > bestScore) {
-        bestScore = totalScore;
-        bestMoves = [{ r: r, c: c }];
-      } else if (totalScore === bestScore) {
-        bestMoves.push({ r: r, c: c });
+      if (board[r][c] === 0) continue; // only expand around placed stones
+      for (dr = -range; dr <= range; dr++) {
+        for (dc = -range; dc <= range; dc++) {
+          nr = r + dr;
+          nc = c + dc;
+          if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) continue;
+          if (board[nr][nc] !== 0) continue;
+          var key = nr * BOARD_SIZE + nc;
+          if (seen[key]) continue;
+          seen[key] = true;
+          candidates.push({ r: nr, c: nc });
+        }
       }
+    }
+  }
+
+  // Fallback: board is empty, play center
+  if (candidates.length === 0) {
+    var mid = Math.floor(BOARD_SIZE / 2);
+    candidates.push({ r: mid, c: mid });
+  }
+
+  return candidates;
+}
+
+// Pick best move for `aiPlayer` against `humanPlayer`
+// Returns {r, c} or null if board is full
+function getAiMove(board, aiPlayer, humanPlayer) {
+  var i, move, attackScore, defenseScore, totalScore;
+  var bestScore = -1;
+  var bestMoves = [];
+
+  var candidates = getCandidates(board, 2);
+
+  for (i = 0; i < candidates.length; i++) {
+    move = candidates[i];
+
+    // Temporarily place stone to evaluate
+    board[move.r][move.c] = aiPlayer;
+    attackScore = evalCell(board, move.r, move.c, aiPlayer);
+    board[move.r][move.c] = 0;
+
+    board[move.r][move.c] = humanPlayer;
+    defenseScore = evalCell(board, move.r, move.c, humanPlayer);
+    board[move.r][move.c] = 0;
+
+    // Slightly favour attack; heavily penalise letting opponent win
+    totalScore = attackScore * 1.1 + defenseScore;
+
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      bestMoves = [{ r: move.r, c: move.c }];
+    } else if (totalScore === bestScore) {
+      bestMoves.push({ r: move.r, c: move.c });
     }
   }
 
@@ -176,6 +209,7 @@ module.exports = {
   checkWin: checkWin,
   evalCell: evalCell,
   lineScore: lineScore,
+  getCandidates: getCandidates,
   getAiMove: getAiMove,
   placeStone: placeStone,
   undoMove: undoMove
