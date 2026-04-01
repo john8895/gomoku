@@ -6,6 +6,9 @@ var BOARD_SIZE = logic.BOARD_SIZE;
 var createBoard = logic.createBoard;
 var createState = logic.createState;
 var checkWin = logic.checkWin;
+var evalCell = logic.evalCell;
+var lineScore = logic.lineScore;
+var getAiMove = logic.getAiMove;
 var placeStone = logic.placeStone;
 var undoMove = logic.undoMove;
 
@@ -150,17 +153,79 @@ describe('checkWin — diagonal slash (↗)', function() {
 
 describe('checkWin — opponent stones do not count', function() {
   var board = createBoard();
-  // 4 black + 1 white in a row
   fillRow(board, 7, 3, 4, 1);
-  board[7][7] = 2;  // white breaks the chain
+  board[7][7] = 2;
   assert(checkWin(board, 7, 6, 1) === false, 'opponent stone breaks the chain');
 });
 
-describe('checkWin — exactly 5, not overline', function() {
+describe('checkWin — overline still wins', function() {
   var board = createBoard();
-  fillRow(board, 7, 2, 6, 1);  // 6 in a row (overline)
-  // Standard gomoku (not renju) still counts overline as win
+  fillRow(board, 7, 2, 6, 1);
   assert(checkWin(board, 7, 4, 1) === true, '6 in a row still wins in standard rules');
+});
+
+describe('lineScore', function() {
+  assert(lineScore(5, 1) === 100000, '5-in-a-row scores max');
+  assert(lineScore(5, 2) === 100000, '5-in-a-row scores max (open both)');
+  assert(lineScore(4, 2) === 50000,  'open four scores 50000');
+  assert(lineScore(4, 1) === 10000,  'half-open four scores 10000');
+  assert(lineScore(3, 2) === 5000,   'open three scores 5000');
+  assert(lineScore(3, 1) === 500,    'half-open three scores 500');
+  assert(lineScore(2, 2) === 100,    'open two scores 100');
+  assert(lineScore(2, 1) === 10,     'half-open two scores 10');
+  assert(lineScore(1, 0) === 0,      'blocked single scores 0');
+  assert(lineScore(4, 0) === 0,      'fully blocked four scores 0');
+});
+
+describe('evalCell — single stone on empty board', function() {
+  var board = createBoard();
+  board[7][7] = 1;
+  var score = evalCell(board, 7, 7, 1);
+  assert(score > 0, 'center stone has positive score');
+
+  var edgeBoard = createBoard();
+  edgeBoard[0][0] = 1;
+  var edgeScore = evalCell(edgeBoard, 0, 0, 1);
+  assert(score > edgeScore, 'center scores higher than corner');
+});
+
+describe('evalCell — recognises four-in-a-row', function() {
+  var board = createBoard();
+  fillRow(board, 7, 3, 4, 1); // 4 black stones in a row
+  board[7][7] = 1;             // completing 5th
+  var score = evalCell(board, 7, 7, 1);
+  assert(score >= 100000, 'completing 5-in-a-row scores max');
+});
+
+describe('getAiMove — blocks immediate human win', function() {
+  var board = createBoard();
+  // Human (black=1) has 4 in a row, AI must block
+  fillRow(board, 7, 3, 4, 1);
+  // board[7][7] is the winning cell for human — AI should block it
+  var move = getAiMove(board, 2, 1);
+  assert(move !== null, 'AI returns a move');
+  assert(move.r === 7 && (move.c === 2 || move.c === 7),
+    'AI blocks at row 7 (either end of the four)');
+});
+
+describe('getAiMove — takes immediate win', function() {
+  var board = createBoard();
+  // AI (white=2) has 4 in a row; should complete to 5
+  fillRow(board, 7, 3, 4, 2);
+  // board[7][7] wins for AI
+  var move = getAiMove(board, 2, 1);
+  assert(move !== null, 'AI returns a move');
+  assert(move.r === 7 && (move.c === 2 || move.c === 7),
+    'AI takes winning move at row 7');
+});
+
+describe('getAiMove — first move on empty board', function() {
+  var board = createBoard();
+  var move = getAiMove(board, 2, 1);
+  assert(move !== null, 'AI moves on empty board');
+  assert(move.r >= 0 && move.r < BOARD_SIZE, 'row in bounds');
+  assert(move.c >= 0 && move.c < BOARD_SIZE, 'col in bounds');
+  assert(board[move.r][move.c] === 0, 'AI targets empty cell');
 });
 
 describe('placeStone — basic placement', function() {
@@ -188,12 +253,10 @@ describe('placeStone — invalid moves', function() {
 
 describe('placeStone — win detection', function() {
   var s = createState();
-  // black places 4 stones
-  placeStone(s, 7, 0); placeStone(s, 0, 0); // black, white
+  placeStone(s, 7, 0); placeStone(s, 0, 0);
   placeStone(s, 7, 1); placeStone(s, 0, 1);
   placeStone(s, 7, 2); placeStone(s, 0, 2);
   placeStone(s, 7, 3); placeStone(s, 0, 3);
-  // black's 5th stone
   var result = placeStone(s, 7, 4);
   assert(result === 'win', 'horizontal 5-in-a-row detected as win');
   assert(s.gameOver === true, 'gameOver set to true');
@@ -209,8 +272,8 @@ describe('placeStone — no move after game over', function() {
 
 describe('undoMove', function() {
   var s = createState();
-  placeStone(s, 7, 7);  // black
-  placeStone(s, 8, 8);  // white
+  placeStone(s, 7, 7);
+  placeStone(s, 8, 8);
 
   var ok = undoMove(s);
   assert(ok === true, 'undo returns true on success');
@@ -232,43 +295,6 @@ describe('undoMove — edge cases', function() {
   s.gameOver = true;
   ok = undoMove(s);
   assert(ok === false, 'undo not allowed after game over');
-});
-
-describe('draw detection', function() {
-  // Fill board without winning
-  var s = createState();
-  var r, c, pattern;
-  // Fill in a pattern that avoids 5-in-a-row:
-  // alternate players in a checkerboard-like pattern, but that can still form lines
-  // Use a known non-winning fill: columns of alternating 2-stone groups
-  // Strategy: fill each row with BWBW... but shift each row so no vertical/diagonal 5
-  // Simple approach: just count that after BOARD_SIZE*BOARD_SIZE moves we get draw
-  // We'll build a state with history length = 225, gameOver=true manually
-  s.history.length = BOARD_SIZE * BOARD_SIZE - 1;
-  s.gameOver = false;
-  s.board[0][0] = 0; // ensure target cell is empty
-
-  // Override the draw check: create a fresh state and fill all but verify draw result
-  var s2 = createState();
-  // manually set board full except [0][0] and set history to 224
-  for (r = 0; r < BOARD_SIZE; r++) {
-    for (c = 0; c < BOARD_SIZE; c++) {
-      s2.board[r][c] = ((r + c) % 2 === 0) ? 1 : 2;
-    }
-  }
-  s2.board[0][0] = 0;
-  // set history length to 224
-  var i;
-  for (i = 0; i < BOARD_SIZE * BOARD_SIZE - 1; i++) {
-    s2.history.push({ r: 0, c: 0, player: 1 });
-  }
-  s2.currentPlayer = 1;
-  // Now place the last stone — checkWin won't fire since board is scattered
-  // but we need to verify the draw path is reachable
-  // (checkWin may return true for checkerboard edge case, so just verify count path)
-  assert(s2.history.length === 224, 'pre-condition: 224 moves in history');
-  // The draw result depends on no-win AND board full — verify logic exists
-  assert(typeof placeStone === 'function', 'placeStone exists for draw path');
 });
 
 // ---------- summary ----------
