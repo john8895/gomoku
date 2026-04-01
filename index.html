@@ -51,7 +51,7 @@ h1 {
   -webkit-flex-direction: row;
   -ms-flex-direction: row;
   flex-direction: row;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   border: 3px solid #000000;
 }
 
@@ -68,6 +68,38 @@ h1 {
 
 .mode-btn.active {
   background-color: #000000;
+  color: #ffffff;
+}
+
+#diff-row {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-flex-direction: row;
+  -ms-flex-direction: row;
+  flex-direction: row;
+  margin-bottom: 20px;
+  border: 2px solid #000000;
+}
+
+#diff-row.hidden {
+  display: none;
+}
+
+.diff-btn {
+  font-size: 22px;
+  font-weight: bold;
+  padding: 10px 28px;
+  border: none;
+  background-color: #ffffff;
+  color: #000000;
+  cursor: pointer;
+  letter-spacing: 2px;
+}
+
+.diff-btn.active {
+  background-color: #555555;
   color: #ffffff;
 }
 
@@ -211,6 +243,12 @@ h1 {
   <button class="mode-btn" id="btn-pvc">人機對戰</button>
 </div>
 
+<div id="diff-row" class="hidden">
+  <button class="diff-btn" id="btn-easy">簡單</button>
+  <button class="diff-btn active" id="btn-normal">普通</button>
+  <button class="diff-btn" id="btn-hard">困難</button>
+</div>
+
 <div id="status-bar">黑方先手</div>
 
 <div id="canvas-wrapper">
@@ -252,6 +290,7 @@ var currentPlayer = 1;
 var gameOver = false;
 var aiMode = false;       // false = PvP, true = PvC (human=black=1, AI=white=2)
 var aiThinking = false;
+var difficulty = 1;       // 0=easy, 1=normal, 2=hard
 
 // ---------- DOM ----------
 var canvas = document.getElementById('board-canvas');
@@ -377,13 +416,16 @@ function drawStone(r, c, player) {
 
 // ---------- AI logic ----------
 
+// 活四(4,2)=50000  死四(4,1)=10000
+// 活三(3,2)=8000   眠三(3,1)=500
+// 活二(2,2)=200    眠二(2,1)=10
 function lineScore(count, openEnds) {
   if (openEnds === 0) return 0;
   if (count >= 5) return 100000;
   if (count === 4) return openEnds === 2 ? 50000 : 10000;
-  if (count === 3) return openEnds === 2 ? 5000 : 500;
-  if (count === 2) return openEnds === 2 ? 100 : 10;
-  if (count === 1) return openEnds === 2 ? 5 : 1;
+  if (count === 3) return openEnds === 2 ? 8000  : 500;
+  if (count === 2) return openEnds === 2 ? 200   : 10;
+  if (count === 1) return openEnds === 2 ? 5     : 1;
   return 0;
 }
 
@@ -418,6 +460,38 @@ function evalCell(r, c, player) {
   return score;
 }
 
+// Count directions where placing creates 活三 or stronger (for Hard fork detection)
+function countThreats(r, c, player) {
+  var i, dr, dc, count, openEnds, nr, nc, threats = 0;
+  for (i = 0; i < DIRECTIONS.length; i++) {
+    dr = DIRECTIONS[i][0];
+    dc = DIRECTIONS[i][1];
+    count = 1;
+    openEnds = 0;
+
+    nr = r + dr; nc = c + dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr += dr; nc += dc;
+    }
+    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === 0) {
+      openEnds++;
+    }
+
+    nr = r - dr; nc = c - dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr -= dr; nc -= dc;
+    }
+    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === 0) {
+      openEnds++;
+    }
+
+    if (lineScore(count, openEnds) >= 8000) threats++;
+  }
+  return threats;
+}
+
 function getCandidates() {
   var r, c, dr, dc, nr, nc;
   var seen = {};
@@ -450,8 +524,7 @@ function getCandidates() {
 
 function getAiMove() {
   var i, move, attackScore, defenseScore, totalScore;
-  var bestScore = -1;
-  var bestMoves = [];
+  var scored = [];
   var candidates = getCandidates();
 
   for (i = 0; i < candidates.length; i++) {
@@ -459,6 +532,9 @@ function getAiMove() {
 
     board[move.r][move.c] = 2; // AI = white
     attackScore = evalCell(move.r, move.c, 2);
+    if (difficulty === 2 && attackScore < 100000) {
+      if (countThreats(move.r, move.c, 2) >= 2) attackScore *= 3; // fork bonus
+    }
     board[move.r][move.c] = 0;
 
     board[move.r][move.c] = 1; // human = black
@@ -466,16 +542,26 @@ function getAiMove() {
     board[move.r][move.c] = 0;
 
     totalScore = attackScore * 1.1 + defenseScore;
-
-    if (totalScore > bestScore) {
-      bestScore = totalScore;
-      bestMoves = [{ r: move.r, c: move.c }];
-    } else if (totalScore === bestScore) {
-      bestMoves.push({ r: move.r, c: move.c });
-    }
+    scored.push({ r: move.r, c: move.c, score: totalScore });
   }
 
-  if (bestMoves.length === 0) return null;
+  if (scored.length === 0) return null;
+
+  scored.sort(function(a, b) { return b.score - a.score; });
+
+  if (difficulty === 0) {
+    // Easy: pick from top-5 randomly
+    var pool = scored.slice(0, Math.min(5, scored.length));
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // Normal / Hard: pick best, break ties randomly
+  var best = scored[0].score;
+  var bestMoves = [];
+  for (i = 0; i < scored.length; i++) {
+    if (scored[i].score < best) break;
+    bestMoves.push(scored[i]);
+  }
   return bestMoves[Math.floor(Math.random() * bestMoves.length)];
 }
 
@@ -595,6 +681,15 @@ function setMode(isAi) {
   aiMode = isAi;
   document.getElementById('btn-pvp').className = 'mode-btn' + (isAi ? '' : ' active');
   document.getElementById('btn-pvc').className = 'mode-btn' + (isAi ? ' active' : '');
+  document.getElementById('diff-row').className = isAi ? '' : 'hidden';
+  restart();
+}
+
+function setDifficulty(level) {
+  difficulty = level;
+  document.getElementById('btn-easy').className   = 'diff-btn' + (level === 0 ? ' active' : '');
+  document.getElementById('btn-normal').className = 'diff-btn' + (level === 1 ? ' active' : '');
+  document.getElementById('btn-hard').className   = 'diff-btn' + (level === 2 ? ' active' : '');
   restart();
 }
 
@@ -648,6 +743,18 @@ document.getElementById('btn-pvp').addEventListener('click', function() {
 
 document.getElementById('btn-pvc').addEventListener('click', function() {
   setMode(true);
+});
+
+document.getElementById('btn-easy').addEventListener('click', function() {
+  setDifficulty(0);
+});
+
+document.getElementById('btn-normal').addEventListener('click', function() {
+  setDifficulty(1);
+});
+
+document.getElementById('btn-hard').addEventListener('click', function() {
+  setDifficulty(2);
 });
 
 // ---------- start ----------

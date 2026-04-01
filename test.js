@@ -9,6 +9,10 @@ var checkWin = logic.checkWin;
 var evalCell = logic.evalCell;
 var lineScore = logic.lineScore;
 var getCandidates = logic.getCandidates;
+var countThreats = logic.countThreats;
+var DIFF_EASY = logic.DIFF_EASY;
+var DIFF_NORMAL = logic.DIFF_NORMAL;
+var DIFF_HARD = logic.DIFF_HARD;
 var getAiMove = logic.getAiMove;
 var placeStone = logic.placeStone;
 var undoMove = logic.undoMove;
@@ -165,17 +169,19 @@ describe('checkWin — overline still wins', function() {
   assert(checkWin(board, 7, 4, 1) === true, '6 in a row still wins in standard rules');
 });
 
-describe('lineScore', function() {
-  assert(lineScore(5, 1) === 100000, '5-in-a-row scores max');
-  assert(lineScore(5, 2) === 100000, '5-in-a-row scores max (open both)');
-  assert(lineScore(4, 2) === 50000,  'open four scores 50000');
-  assert(lineScore(4, 1) === 10000,  'half-open four scores 10000');
-  assert(lineScore(3, 2) === 5000,   'open three scores 5000');
-  assert(lineScore(3, 1) === 500,    'half-open three scores 500');
-  assert(lineScore(2, 2) === 100,    'open two scores 100');
-  assert(lineScore(2, 1) === 10,     'half-open two scores 10');
+describe('lineScore — updated weights', function() {
+  assert(lineScore(5, 1) === 100000, '五連 scores max');
+  assert(lineScore(5, 2) === 100000, '五連 scores max (open both)');
+  assert(lineScore(4, 2) === 50000,  '活四 scores 50000');
+  assert(lineScore(4, 1) === 10000,  '死四 scores 10000');
+  assert(lineScore(3, 2) === 8000,   '活三 scores 8000');
+  assert(lineScore(3, 1) === 500,    '眠三 scores 500');
+  assert(lineScore(2, 2) === 200,    '活二 scores 200');
+  assert(lineScore(2, 1) === 10,     '眠二 scores 10');
   assert(lineScore(1, 0) === 0,      'blocked single scores 0');
   assert(lineScore(4, 0) === 0,      'fully blocked four scores 0');
+  // 活三 must be significantly stronger than 眠三
+  assert(lineScore(3, 2) > lineScore(3, 1) * 10, '活三 >> 眠三 by >10x');
 });
 
 describe('evalCell — single stone on empty board', function() {
@@ -227,6 +233,45 @@ describe('getAiMove — first move on empty board', function() {
   assert(move.r >= 0 && move.r < BOARD_SIZE, 'row in bounds');
   assert(move.c >= 0 && move.c < BOARD_SIZE, 'col in bounds');
   assert(board[move.r][move.c] === 0, 'AI targets empty cell');
+});
+
+describe('countThreats — detects 活三', function() {
+  var board = createBoard();
+  // Place 2 black stones → placing a 3rd makes 活三
+  board[7][5] = 1;
+  board[7][6] = 1;
+  board[7][7] = 1; // temporarily place to measure
+  var threats = countThreats(board, 7, 7, 1);
+  board[7][7] = 0;
+  assert(threats >= 1, '三連活三 counts ≥1 threat');
+});
+
+describe('countThreats — fork detection', function() {
+  var board = createBoard();
+  // Create a position where one move creates two 活三 simultaneously (fork)
+  board[5][7] = 1; board[6][7] = 1; // vertical pair
+  board[7][5] = 1; board[7][6] = 1; // horizontal pair
+  // Placing at [7][7] should create threats in both directions
+  board[7][7] = 1;
+  var threats = countThreats(board, 7, 7, 1);
+  board[7][7] = 0;
+  assert(threats >= 2, 'fork position detects ≥2 threats');
+});
+
+describe('getAiMove — difficulty easy returns valid move', function() {
+  var board = createBoard();
+  board[7][7] = 1;
+  var move = getAiMove(board, 2, 1, DIFF_EASY);
+  assert(move !== null, 'easy AI returns a move');
+  assert(board[move.r][move.c] === 0, 'easy AI targets empty cell');
+});
+
+describe('getAiMove — difficulty hard blocks win', function() {
+  var board = createBoard();
+  fillRow(board, 7, 3, 4, 1); // human 4-in-a-row
+  var move = getAiMove(board, 2, 1, DIFF_HARD);
+  assert(move !== null, 'hard AI returns a move');
+  assert(move.r === 7 && (move.c === 2 || move.c === 7), 'hard AI blocks at row 7');
 });
 
 describe('getCandidates — empty board returns center', function() {

@@ -10,6 +10,11 @@ var DIRECTIONS = [
   [1, -1]   // diagonal slash
 ];
 
+// Difficulty constants
+var DIFF_EASY   = 0;
+var DIFF_NORMAL = 1;
+var DIFF_HARD   = 2;
+
 function createBoard() {
   var i, j, board = [];
   for (i = 0; i < BOARD_SIZE; i++) {
@@ -45,13 +50,16 @@ function checkWin(board, r, c, player) {
 // ---------- AI scoring ----------
 
 // Score a line of `count` consecutive stones with `openEnds` open endpoints
+// 活四(4,2)=50000  死四(4,1)=10000
+// 活三(3,2)=8000   眠三(3,1)=500
+// 活二(2,2)=200    眠二(2,1)=10
 function lineScore(count, openEnds) {
   if (openEnds === 0) return 0;
   if (count >= 5) return 100000;
   if (count === 4) return openEnds === 2 ? 50000 : 10000;
-  if (count === 3) return openEnds === 2 ? 5000 : 500;
-  if (count === 2) return openEnds === 2 ? 100 : 10;
-  if (count === 1) return openEnds === 2 ? 5 : 1;
+  if (count === 3) return openEnds === 2 ? 8000  : 500;
+  if (count === 2) return openEnds === 2 ? 200   : 10;
+  if (count === 1) return openEnds === 2 ? 5     : 1;
   return 0;
 }
 
@@ -64,7 +72,6 @@ function evalCell(board, r, c, player) {
     count = 1;
     openEnds = 0;
 
-    // forward
     nr = r + dr; nc = c + dc;
     while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
       count++;
@@ -74,7 +81,6 @@ function evalCell(board, r, c, player) {
       openEnds++;
     }
 
-    // backward
     nr = r - dr; nc = c - dc;
     while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
       count++;
@@ -89,6 +95,38 @@ function evalCell(board, r, c, player) {
   return score;
 }
 
+// Count directions where placing at (r,c) creates a 活三 or stronger threat
+function countThreats(board, r, c, player) {
+  var i, dr, dc, count, openEnds, nr, nc, threats = 0;
+  for (i = 0; i < DIRECTIONS.length; i++) {
+    dr = DIRECTIONS[i][0];
+    dc = DIRECTIONS[i][1];
+    count = 1;
+    openEnds = 0;
+
+    nr = r + dr; nc = c + dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr += dr; nc += dc;
+    }
+    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === 0) {
+      openEnds++;
+    }
+
+    nr = r - dr; nc = c - dc;
+    while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+      count++;
+      nr -= dr; nc -= dc;
+    }
+    if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === 0) {
+      openEnds++;
+    }
+
+    if (lineScore(count, openEnds) >= 8000) threats++; // 活三 or better
+  }
+  return threats;
+}
+
 // Return candidate cells: empty cells within `range` steps of any existing stone
 function getCandidates(board, range) {
   var r, c, dr, dc, nr, nc;
@@ -97,7 +135,7 @@ function getCandidates(board, range) {
 
   for (r = 0; r < BOARD_SIZE; r++) {
     for (c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] === 0) continue; // only expand around placed stones
+      if (board[r][c] === 0) continue;
       for (dr = -range; dr <= range; dr++) {
         for (dc = -range; dc <= range; dc++) {
           nr = r + dr;
@@ -113,7 +151,6 @@ function getCandidates(board, range) {
     }
   }
 
-  // Fallback: board is empty, play center
   if (candidates.length === 0) {
     var mid = Math.floor(BOARD_SIZE / 2);
     candidates.push({ r: mid, c: mid });
@@ -122,46 +159,60 @@ function getCandidates(board, range) {
   return candidates;
 }
 
-// Pick best move for `aiPlayer` against `humanPlayer`
-// Returns {r, c} or null if board is full
-function getAiMove(board, aiPlayer, humanPlayer) {
+// Pick best move for `aiPlayer` against `humanPlayer` at given difficulty
+// difficulty: DIFF_EASY=0, DIFF_NORMAL=1, DIFF_HARD=2
+function getAiMove(board, aiPlayer, humanPlayer, difficulty) {
+  if (difficulty === undefined) difficulty = DIFF_NORMAL;
+
   var i, move, attackScore, defenseScore, totalScore;
-  var bestScore = -1;
-  var bestMoves = [];
+  var scored = [];
 
   var candidates = getCandidates(board, 2);
 
   for (i = 0; i < candidates.length; i++) {
     move = candidates[i];
 
-    // Temporarily place stone to evaluate
     board[move.r][move.c] = aiPlayer;
     attackScore = evalCell(board, move.r, move.c, aiPlayer);
+
+    // Hard: bonus for double-threat (fork)
+    if (difficulty === DIFF_HARD && attackScore < 100000) {
+      var threats = countThreats(board, move.r, move.c, aiPlayer);
+      if (threats >= 2) attackScore *= 3;
+    }
     board[move.r][move.c] = 0;
 
     board[move.r][move.c] = humanPlayer;
     defenseScore = evalCell(board, move.r, move.c, humanPlayer);
     board[move.r][move.c] = 0;
 
-    // Slightly favour attack; heavily penalise letting opponent win
     totalScore = attackScore * 1.1 + defenseScore;
-
-    if (totalScore > bestScore) {
-      bestScore = totalScore;
-      bestMoves = [{ r: move.r, c: move.c }];
-    } else if (totalScore === bestScore) {
-      bestMoves.push({ r: move.r, c: move.c });
-    }
+    scored.push({ r: move.r, c: move.c, score: totalScore });
   }
 
-  if (bestMoves.length === 0) return null;
-  // Break ties randomly for variety
+  if (scored.length === 0) return null;
+
+  // Sort descending by score
+  scored.sort(function(a, b) { return b.score - a.score; });
+
+  if (difficulty === DIFF_EASY) {
+    // Pick randomly from top-5 (or fewer)
+    var pool = scored.slice(0, Math.min(5, scored.length));
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // Normal / Hard: pick best, break ties randomly
+  var best = scored[0].score;
+  var bestMoves = [];
+  for (i = 0; i < scored.length; i++) {
+    if (scored[i].score < best) break;
+    bestMoves.push(scored[i]);
+  }
   return bestMoves[Math.floor(Math.random() * bestMoves.length)];
 }
 
 // ---------- game state ----------
 
-// Place a stone; returns 'win', 'draw', or 'continue'
 function placeStone(state, r, c) {
   if (state.gameOver) return null;
   if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return null;
@@ -204,11 +255,15 @@ function createState() {
 
 module.exports = {
   BOARD_SIZE: BOARD_SIZE,
+  DIFF_EASY: DIFF_EASY,
+  DIFF_NORMAL: DIFF_NORMAL,
+  DIFF_HARD: DIFF_HARD,
   createBoard: createBoard,
   createState: createState,
   checkWin: checkWin,
   evalCell: evalCell,
   lineScore: lineScore,
+  countThreats: countThreats,
   getCandidates: getCandidates,
   getAiMove: getAiMove,
   placeStone: placeStone,
