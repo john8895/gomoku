@@ -29,16 +29,16 @@ body {
   -ms-flex-align: center;
   align-items: center;
   min-height: 100vh;
-  padding: 40px 20px;
+  padding: 20px 16px;
 }
 
 h1 {
-  font-size: 56px;
+  font-size: 40px;
   font-weight: bold;
-  letter-spacing: 8px;
-  margin-bottom: 30px;
-  border-bottom: 4px solid #000000;
-  padding-bottom: 16px;
+  letter-spacing: 6px;
+  margin-bottom: 20px;
+  border-bottom: 3px solid #000000;
+  padding-bottom: 12px;
   width: 100%;
   text-align: center;
 }
@@ -51,19 +51,19 @@ h1 {
   -webkit-flex-direction: row;
   -ms-flex-direction: row;
   flex-direction: row;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   border: 3px solid #000000;
 }
 
 .mode-btn {
-  font-size: 34px;
+  font-size: 26px;
   font-weight: bold;
-  padding: 18px 60px;
+  padding: 12px 36px;
   border: none;
   background-color: #ffffff;
   color: #000000;
   cursor: pointer;
-  letter-spacing: 4px;
+  letter-spacing: 3px;
 }
 
 .mode-btn.active {
@@ -72,20 +72,21 @@ h1 {
 }
 
 #status-bar {
-  font-size: 38px;
+  font-size: 28px;
   font-weight: bold;
-  margin-bottom: 30px;
-  padding: 16px 40px;
+  margin-bottom: 20px;
+  padding: 12px 30px;
   border: 3px solid #000000;
   background-color: #f0f0f0;
-  min-width: 500px;
+  min-width: 300px;
   text-align: center;
-  letter-spacing: 4px;
+  letter-spacing: 3px;
 }
 
 #canvas-wrapper {
   position: relative;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
+  max-width: 100%;
 }
 
 #board-canvas {
@@ -93,6 +94,7 @@ h1 {
   border: 4px solid #000000;
   cursor: pointer;
   background-color: #e8d8a0;
+  max-width: 100%;
 }
 
 #btn-row {
@@ -105,19 +107,19 @@ h1 {
   -webkit-flex-direction: row;
   -ms-flex-direction: row;
   flex-direction: row;
-  gap: 40px;
+  gap: 24px;
 }
 
 .btn {
-  font-size: 36px;
+  font-size: 26px;
   font-weight: bold;
-  padding: 22px 60px;
-  border: 4px solid #000000;
+  padding: 14px 36px;
+  border: 3px solid #000000;
   background-color: #ffffff;
   color: #000000;
   cursor: pointer;
-  letter-spacing: 4px;
-  min-width: 260px;
+  letter-spacing: 3px;
+  min-width: 160px;
   text-align: center;
 }
 
@@ -166,33 +168,33 @@ h1 {
 
 #result-box {
   background-color: #ffffff;
-  border: 6px solid #000000;
-  padding: 60px 80px;
+  border: 5px solid #000000;
+  padding: 40px 60px;
   text-align: center;
 }
 
 #result-title {
-  font-size: 64px;
+  font-size: 44px;
   font-weight: bold;
-  margin-bottom: 20px;
-  letter-spacing: 8px;
+  margin-bottom: 14px;
+  letter-spacing: 6px;
 }
 
 #result-sub {
-  font-size: 40px;
-  margin-bottom: 50px;
+  font-size: 28px;
+  margin-bottom: 36px;
   color: #333333;
 }
 
 #btn-play-again {
-  font-size: 40px;
+  font-size: 28px;
   font-weight: bold;
-  padding: 24px 80px;
-  border: 4px solid #000000;
+  padding: 16px 50px;
+  border: 3px solid #000000;
   background-color: #000000;
   color: #ffffff;
   cursor: pointer;
-  letter-spacing: 6px;
+  letter-spacing: 4px;
 }
 
 #btn-play-again:active {
@@ -416,31 +418,60 @@ function evalCell(r, c, player) {
   return score;
 }
 
-function getAiMove() {
-  var r, c, attackScore, defenseScore, totalScore;
-  var bestScore = -1;
-  var bestMoves = [];
+function getCandidates() {
+  var r, c, dr, dc, nr, nc;
+  var seen = {};
+  var candidates = [];
 
   for (r = 0; r < BOARD_SIZE; r++) {
     for (c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] !== 0) continue;
-
-      board[r][c] = 2; // AI = white
-      attackScore = evalCell(r, c, 2);
-      board[r][c] = 0;
-
-      board[r][c] = 1; // human = black
-      defenseScore = evalCell(r, c, 1);
-      board[r][c] = 0;
-
-      totalScore = attackScore * 1.1 + defenseScore;
-
-      if (totalScore > bestScore) {
-        bestScore = totalScore;
-        bestMoves = [{ r: r, c: c }];
-      } else if (totalScore === bestScore) {
-        bestMoves.push({ r: r, c: c });
+      if (board[r][c] === 0) continue;
+      for (dr = -2; dr <= 2; dr++) {
+        for (dc = -2; dc <= 2; dc++) {
+          nr = r + dr; nc = c + dc;
+          if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) continue;
+          if (board[nr][nc] !== 0) continue;
+          var key = nr * BOARD_SIZE + nc;
+          if (seen[key]) continue;
+          seen[key] = true;
+          candidates.push({ r: nr, c: nc });
+        }
       }
+    }
+  }
+
+  if (candidates.length === 0) {
+    var mid = Math.floor(BOARD_SIZE / 2);
+    candidates.push({ r: mid, c: mid });
+  }
+
+  return candidates;
+}
+
+function getAiMove() {
+  var i, move, attackScore, defenseScore, totalScore;
+  var bestScore = -1;
+  var bestMoves = [];
+  var candidates = getCandidates();
+
+  for (i = 0; i < candidates.length; i++) {
+    move = candidates[i];
+
+    board[move.r][move.c] = 2; // AI = white
+    attackScore = evalCell(move.r, move.c, 2);
+    board[move.r][move.c] = 0;
+
+    board[move.r][move.c] = 1; // human = black
+    defenseScore = evalCell(move.r, move.c, 1);
+    board[move.r][move.c] = 0;
+
+    totalScore = attackScore * 1.1 + defenseScore;
+
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      bestMoves = [{ r: move.r, c: move.c }];
+    } else if (totalScore === bestScore) {
+      bestMoves.push({ r: move.r, c: move.c });
     }
   }
 

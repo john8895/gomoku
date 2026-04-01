@@ -8,6 +8,7 @@ var createState = logic.createState;
 var checkWin = logic.checkWin;
 var evalCell = logic.evalCell;
 var lineScore = logic.lineScore;
+var getCandidates = logic.getCandidates;
 var getAiMove = logic.getAiMove;
 var placeStone = logic.placeStone;
 var undoMove = logic.undoMove;
@@ -226,6 +227,99 @@ describe('getAiMove — first move on empty board', function() {
   assert(move.r >= 0 && move.r < BOARD_SIZE, 'row in bounds');
   assert(move.c >= 0 && move.c < BOARD_SIZE, 'col in bounds');
   assert(board[move.r][move.c] === 0, 'AI targets empty cell');
+});
+
+describe('getCandidates — empty board returns center', function() {
+  var board = createBoard();
+  var mid = Math.floor(BOARD_SIZE / 2);
+  var cands = getCandidates(board, 2);
+  assert(cands.length === 1, 'empty board yields 1 candidate');
+  assert(cands[0].r === mid && cands[0].c === mid, 'candidate is center');
+});
+
+describe('getCandidates — range 2 around single stone', function() {
+  var board = createBoard();
+  board[7][7] = 1;
+  var cands = getCandidates(board, 2);
+  // 5x5 area around (7,7) minus the stone itself = 24 cells
+  assert(cands.length === 24, '24 candidates around single center stone');
+  var hasDup = false;
+  var seen = {};
+  var i, k;
+  for (i = 0; i < cands.length; i++) {
+    k = cands[i].r + ',' + cands[i].c;
+    if (seen[k]) { hasDup = true; break; }
+    seen[k] = true;
+  }
+  assert(!hasDup, 'no duplicate candidates');
+});
+
+describe('getCandidates — all candidates are empty', function() {
+  var board = createBoard();
+  board[7][7] = 1;
+  board[7][8] = 2;
+  var cands = getCandidates(board, 2);
+  var allEmpty = true;
+  var i;
+  for (i = 0; i < cands.length; i++) {
+    if (board[cands[i].r][cands[i].c] !== 0) { allEmpty = false; break; }
+  }
+  assert(allEmpty, 'all candidates are empty cells');
+});
+
+describe('getCandidates — does not go out of bounds', function() {
+  var board = createBoard();
+  board[0][0] = 1; // corner stone
+  var cands = getCandidates(board, 2);
+  var inBounds = true;
+  var i, c;
+  for (i = 0; i < cands.length; i++) {
+    c = cands[i];
+    if (c.r < 0 || c.r >= BOARD_SIZE || c.c < 0 || c.c >= BOARD_SIZE) {
+      inBounds = false; break;
+    }
+  }
+  assert(inBounds, 'all candidates within board bounds');
+});
+
+describe('getCandidates vs full-scan speed', function() {
+  var board = createBoard();
+  var i;
+  // Place 10 stones in center area
+  var stones = [[7,7],[7,8],[8,7],[8,8],[6,7],[7,6],[9,7],[7,9],[6,6],[9,9]];
+  for (i = 0; i < stones.length; i++) {
+    board[stones[i][0]][stones[i][1]] = (i % 2 === 0) ? 1 : 2;
+  }
+
+  var REPS = 500;
+  var t0, t1;
+
+  // Full scan (old approach)
+  t0 = Date.now();
+  for (i = 0; i < REPS; i++) {
+    var fullCount = 0;
+    var r, c;
+    for (r = 0; r < BOARD_SIZE; r++) {
+      for (c = 0; c < BOARD_SIZE; c++) {
+        if (board[r][c] === 0) fullCount++;
+      }
+    }
+  }
+  t1 = Date.now();
+  var fullMs = t1 - t0;
+
+  // Candidate scan (new approach)
+  t0 = Date.now();
+  for (i = 0; i < REPS; i++) {
+    getCandidates(board, 2);
+  }
+  t1 = Date.now();
+  var candMs = t1 - t0;
+
+  var cands = getCandidates(board, 2);
+  console.log('  INFO: candidates=' + cands.length + '/215 empty cells, full=' + fullMs + 'ms vs candidate=' + candMs + 'ms (' + REPS + ' reps)');
+  assert(cands.length < BOARD_SIZE * BOARD_SIZE - 10, 'candidate set smaller than full board');
+  assert(cands.length > 0, 'candidate set non-empty');
 });
 
 describe('placeStone — basic placement', function() {
